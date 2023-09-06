@@ -1,21 +1,15 @@
 import { parse } from "@babel/parser";
 import traverser from "@babel/traverse";
-import generator from "@babel/generator";
 import t from "@babel/types";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import fse from "fs-extra";
+import { apisStr } from "./apis.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const traverse = traverser.default;
-const generate = generator.default;
-
-const generateCode = (ast) => {
-  const { code } = generate(ast);
-  return code;
-};
 
 const codeBuffer = await fse.readFile(
   resolve(__dirname, "../code/front-end-code.tsx")
@@ -70,6 +64,9 @@ traverse(ast, {
         .filter((char) => !["\n", "*"].includes(char))
         .join("")
         .trim();
+      if (content === "@ones-api-ignore-file") {
+        path.stop();
+      }
       const { line, column } = comment.loc.start;
       if (content === "@ones-api-ignore") {
         ignoredLines.push(line + 1);
@@ -90,6 +87,9 @@ traverse(ast, {
   ImportDeclaration: (path) => {
     path.skip();
   },
+  ExportNamedDeclaration: (path) => {
+    path.skip();
+  },
   "StringLiteral|TemplateLiteral": (path) => {
     if (!isIgnored(path.node) && isPathLikeStringNode(path.node)) {
       const { line, column } = path.node.loc.start;
@@ -98,8 +98,8 @@ traverse(ast, {
         location: {
           line,
           column,
-          ast: path.node,
         },
+        ast: path.node,
       });
       if (t.isTemplateLiteral(path.node)) {
         path.skip();
@@ -119,17 +119,72 @@ traverse(ast, {
         location: {
           line,
           column,
-          ast: targetPath.node,
         },
+        ast: targetPath.node,
       });
       path.skip();
     }
   },
 });
 
-// 把识别到的pathLike的字符串转为正则表达式：(?:[^\n]+)?/auth/(?:[^\n]+)/reset_password/dasdasd(?:[^\n]+)
-transformStringLiteralToPattern = ({ value, ast }) => {
-  return;
+const pre = "(?:[^\n]*)";
+const placeHolder = "(?:[^\n/]*)";
+const post = "(?:[^\n]*)";
+
+// 把识别到的pathLike的字符串转为正则表达式：(?:[^\n]*)${url}(?:\n)
+const transformStringLiteralToPattern = (value) => {
+  const [url] = value.split("?");
+  return url;
 };
 
-console.log(collected);
+const transformTemplateLiteralToPattern = (ast) => {
+  const { quasis = [] } = ast;
+  const url = quasis
+    .map((quasi) => quasi.value.raw.split("?")[0])
+    .join(placeHolder);
+  return url;
+};
+
+const transformBinaryExpressionToPattern = (ast) => {
+  let pattern = "";
+  const { left, right } = ast;
+  for (const subNode of [right, left]) {
+    if (t.isStringLiteral(subNode)) {
+      pattern = transformStringLiteralToPattern(subNode.value) + pattern;
+    } else if (t.isTemplateLiteral(subNode)) {
+      pattern = transformTemplateLiteralToPattern(subNode) + pattern;
+    } else if (t.isBinaryExpression(subNode, { operator: "+" })) {
+      pattern = transformBinaryExpressionToPattern(subNode) + pattern;
+    } else {
+      pattern = placeHolder + pattern;
+    }
+  }
+  return pattern;
+};
+
+collected.forEach((item) => {
+  const { ast, value } = item;
+  let patternStr = "";
+  if (!ast) {
+    patternStr = transformStringLiteralToPattern(value);
+  } else if (t.isStringLiteral(ast)) {
+    patternStr = transformStringLiteralToPattern(ast.value);
+  } else if (t.isTemplateLiteral(ast)) {
+    patternStr = transformTemplateLiteralToPattern(ast);
+  } else if (t.isBinaryExpression(ast, { operator: "+" })) {
+    patternStr = transformBinaryExpressionToPattern(ast);
+  }
+  if (patternStr) {
+    item.pattern = new RegExp(`${pre}${patternStr}${post}`, "ig");
+    item.match = apisStr.match(item.pattern);
+  }
+});
+
+console.log(
+  collected.map(({ value, pattern, location, match }) => ({
+    value,
+    location,
+    pattern,
+    match,
+  }))
+);

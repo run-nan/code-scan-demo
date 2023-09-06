@@ -9,25 +9,29 @@ const request = (url) => {
 };
 
 const API = {
-  getUser: () => `/users/me`,
-  updateUser: (teamUUID) => `/team/${teamUUID}/`,
+  getVersion: () => "/version",
+  // @ones-api: /auth/v2/login
+  // @ones-api: /auth/login
+  // @ones-api-ignore
+  login: () => `/auth${process.env.ENV === "production" ? "/v2" : ""}/login`,
+  getTeamMembers: (teamUUID) => `/team/${teamUUID}/members`,
+  updateIssueType: (teamUUID, issueTypeUUID) =>
+    `/team/${teamUUID}/issue_type/` + issueTypeUUID + "/update",
+  ldapLogin: (query) => `/ldap/login?${query}`,
 };
 
-// @ones-api: /test/ai/dasdasd
-const normalRequest = "dahsdkakljllkjkjklda";
+const normalStr = "dahsdkakljllkjkjklda";
 
-/**
- * @ones-api: /test/ai
- */
-const path =
-  "dsdasl/" + normalRequest + "hdksjhka" + "dasdas/dasdasd" + "dasdasdas";
+fetchONES("api/project/auth/v2/reset_password");
 
-const anotherPath = `${"dsadasdsa/dasdasd"}/dasdasd` + "ddasda";
-
-const path2 = "dasdas" + "dasdasd/";
-
-fetchONES("api/project/users/me");
-
-const Demo = () => {
-  return <div className="dsds/dasfasfas"></div>;
+export const Demo = () => {
+  React.useEffect(() => {
+    request(API.getVersion());
+    request(API.login());
+    request(API.getTeamMembers("teamUUID"));
+    request(API.updateIssueType("teamUUID", "issueTypeUUID"));
+    request(API.ldapLogin("query"));
+  }, []);
+  // @ones-api-ignore
+  return <div className="dsds/dasfasfas">{normalStr}</div>;
 };
